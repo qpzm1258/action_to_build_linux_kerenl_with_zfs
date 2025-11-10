@@ -1,4 +1,4 @@
-name: Build Linux Kernel + ZFS debs
+name: Fast Build Linux Kernel + ZFS debs
 
 on:
   workflow_dispatch:
@@ -17,20 +17,25 @@ on:
         default: "zfs-2.3.0"
 
 jobs:
-  kernel:
+  build:
     runs-on: ubuntu-22.04
-    outputs:
-      kernel_version: ${{ steps.meta.outputs.kernel_version }}
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Install build deps
         run: |
           sudo apt update
-          sudo apt install -y build-essential bc bison flex libncurses5-dev \
+          sudo apt install -y \
+            build-essential bc bison flex libncurses5-dev \
             libssl-dev libelf-dev dwarves fakeroot devscripts debhelper \
-            curl jq xz-utils rsync
+            curl jq xz-utils rsync ccache \
+            autoconf automake libtool pkg-config gawk \
+            dh-python dh-sequence-dkms \
+            uuid-dev libblkid-dev libudev-dev zlib1g-dev \
+            libaio-dev libcurl4-openssl-dev libpam0g-dev \
+            libtirpc-dev libunwind-dev \
+            python3-all-dev python3-cffi python3-setuptools python3-sphinx
 
       - name: Fetch latest patch version
         id: meta
@@ -44,15 +49,15 @@ jobs:
       - name: Download kernel source
         run: |
           kv=${{ steps.meta.outputs.kernel_version }}
-          curl -L https://cdn.kernel.org/pub/linux/kernel/v${kv%%.*}.x/linux-${kv}.tar.xz -o linux.tar.xz
+          curl -L "https://cdn.kernel.org/pub/linux/kernel/v${kv%%.*}.x/linux-${kv}.tar.xz" -o linux.tar.xz
           tar -xf linux.tar.xz
-          mv linux-${kv} linux
+          mv "linux-${kv}" linux
 
       - name: Apply repo .config
         working-directory: linux
         run: |
-          cp ../.config .config
-          yes "" | make olddefconfig
+          cp $GITHUB_WORKSPACE/.config .config
+        #  yes "" | make olddefconfig
 
       - name: Build kernel debs
         working-directory: linux
@@ -61,61 +66,30 @@ jobs:
           cd ..
           ls -la *.deb
 
-      - name: Upload kernel debs
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-debs
-          path: "*.deb"
-
-  zfs:
-    runs-on: ubuntu-22.04
-    needs: kernel
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install ZFS deps
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential autoconf automake libtool pkg-config gawk \
-            fakeroot debhelper dh-python dh-sequence-dkms \
-            uuid-dev libblkid-dev libudev-dev libssl-dev zlib1g-dev \
-            libaio-dev libcurl4-openssl-dev libpam0g-dev \
-            libtirpc-dev libunwind-dev \
-            python3-all-dev python3-cffi python3-setuptools python3-sphinx
-
-      - name: Download kernel debs
-        uses: actions/download-artifact@v4
-        with:
-          name: kernel-debs
-          path: kernel-debs
-
-      - name: Install kernel headers
-        run: |
-          sudo dpkg -i kernel-debs/linux-headers-*.deb || true
-          sudo dpkg -i kernel-debs/linux-image-*.deb || true
-
       - name: Fetch OpenZFS
         run: |
           git clone https://github.com/openzfs/zfs.git
           cd zfs
-          git checkout ${{ github.event.inputs.zfs_ref }}
+          git checkout "${{ github.event.inputs.zfs_ref }}"
           ./autogen.sh
 
-      - name: Configure ZFS
+      - name: Configure ZFS against kernel source
         working-directory: zfs
         run: |
-          rel=$(ls /lib/modules | grep ${{ github.event.inputs.kernel_version }} | head -n1)
-          ./configure --with-linux=/lib/modules/$rel/build --with-linux-obj=/lib/modules/$rel/build --enable-systemd
+          KDIR="$GITHUB_WORKSPACE/linux"
+          ./configure --with-linux="$KDIR" --with-linux-obj="$KDIR" --enable-systemd
 
       - name: Build ZFS native deb
         working-directory: zfs
         run: |
-          make native-deb
+          make -j$(nproc) native-deb
           ls -la ../*.deb
 
-      - name: Upload ZFS debs
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zfs-debs
-          path: "../*.deb"
+          name: kernel-zfs-debs
+          path: |
+            linux/.config
+            *.deb
+            ../*.deb
