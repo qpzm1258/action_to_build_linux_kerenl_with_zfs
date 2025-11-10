@@ -92,4 +92,3 @@ jobs:
           path: |
             linux/.config
             *.deb
-            ../*.deb
