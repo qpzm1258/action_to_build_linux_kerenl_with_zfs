@@ -93,7 +93,10 @@ jobs:
       - name: Build ZFS native deb
         working-directory: zfs
         run: |
-          make -j$(nproc) native-deb --with-linux="$KDIR" --with-linux-obj="$KDIR" --enable-systemd
+          sudo KVERS=${{ steps.meta.outputs.kernel_version }} \
+          KSRC="$GITHUB_WORKSPACE/linux" \
+          KOBJ="$GITHUB_WORKSPACE/linux" \
+          make -j$(nproc) native-deb 
           ls -la ../*.deb
 
       - name: Upload artifacts
