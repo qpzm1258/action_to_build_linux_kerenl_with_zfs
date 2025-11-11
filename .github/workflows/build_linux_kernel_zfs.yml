@@ -93,7 +93,7 @@ jobs:
       - name: Build ZFS native deb
         working-directory: zfs
         run: |
-          make -j$(nproc) native-deb
+          make -j$(nproc) native-deb --with-linux="$KDIR" --with-linux-obj="$KDIR" --enable-systemd
           ls -la ../*.deb
 
       - name: Upload artifacts
